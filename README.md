@@ -11,8 +11,8 @@ Steps for configuring a persistent static IP and changing the system hostname on
 | IP/Subnet | `10.0.0.50/24` |
 | Gateway | `10.0.0.1` |
 | DNS | `8.8.8.8,1.1.1.1` |
-| Hostname (FQDN) | `web01.example.com` |
-| Short Hostname | `web01` |
+| Hostname (FQDN) | `<new-hostname-here>.example.com` |
+| Short Hostname | `<new-hostname-here>` |
 
 ---
 
@@ -96,7 +96,7 @@ hostname -f
 ```
 **Expected:**
 ```text
-web01.example.com
+<new-hostname-here>
 ```
 ```bash
 ping -c 2 8.8.8.8
@@ -112,7 +112,7 @@ ping -c 2 8.8.8.8
 ```bash
 sudo nmcli con mod ens192 ipv4.method auto && sudo nmcli con up ens192
 sudo hostnamectl set-hostname localhost.localdomain
-# Clean /etc/hosts: remove web01.example.com & web01 from the 127.0.0.1 line
+# Clean /etc/hosts: remove <new-hostname-here>.example.com & <new-hostname-here> from the 127.0.0.1 line
 ```
 ---
 
