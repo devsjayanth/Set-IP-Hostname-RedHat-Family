@@ -1,8 +1,9 @@
 # 🛠️ Static IP & Hostname Setup (RHEL/Fedora)
-*Copy-paste ready. Uses `ens192` as the working example. Swap values if your network differs.*
 Steps for configuring a static IP and changing the hostname on RHEL/Fedora-based systems. It uses nmcli and hostnamectl for reliable, persistent changes, providing exact commands, expected outputs, quick verification steps.
 
-## 🔑 Values Used in This Guide
+*Copy-paste ready. Uses `ens192` as the working example. Swap values if your network differs.*
+
+## 🔑 Example Values Used
 | Setting | Example Value |
 |---------|---------------|
 | Connection | `ens192` |
