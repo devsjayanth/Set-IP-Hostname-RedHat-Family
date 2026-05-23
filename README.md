@@ -27,7 +27,9 @@ sudo systemctl enable --now NetworkManager
 
 ## Phase 2: Diagnosing & Fixing the "Unmanaged" State (CRITICAL)
 If you run `nmcli device status` and see **`unmanaged`** under the STATE column, NetworkManager is explicitly ignoring your hardware. **You cannot assign an IP until this is fixed.**
-
+```
+nmcli device status
+```
 ### 🔍 Why does this happen?
 1. **Debian/Ubuntu:** The interface is defined in the legacy `/etc/network/interfaces` file, so NM backs off.
 2. **RHEL/CentOS:** The legacy `ifcfg-*` script has `NM_CONTROLLED=no`.
