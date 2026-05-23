@@ -1,126 +1,200 @@
 # 🐧Linux Network Manager Quick Guide
-Quick guide to modify internet settings using Network Manager tool - "nmcli".
-## Installation:
+Here is the ultimate, comprehensive Standard Operating Procedure (SOP). I have significantly expanded the **"Unmanaged State"** section, as this is the #1 reason `nmcli` fails on minimal, cloud, or freshly installed servers.
 
-### 🐧 Debian / Ubuntu
-**Install & Enable:**
+---
+
+# 📄 The Ultimate Guide to Static IP Configuration with `nmcli`
+**Supported Distros:** Debian, Ubuntu, RHEL, CentOS, Rocky, Alma, Fedora.
+
+⚠️ **Pre-Flight Warning (SSH Users):** Applying network changes over SSH can drop your session if there is a typo. Have console/KVM access available, or keep a backup DHCP plan ready (see Troubleshooting).
+
+---
+
+## Phase 1: Install & Enable NetworkManager
+NetworkManager is default on RHEL, but often missing on minimal Debian/Ubuntu servers.
+
+**For Debian / Ubuntu:**
 ```bash
 sudo apt update
 sudo apt install -y network-manager
-sudo systemctl disable --now systemd-networkd  # avoid conflicts
 sudo systemctl enable --now NetworkManager
 ```
-*(Note: Not installed by default on Debian Server. Service name is `NetworkManager` with capital N.)*
 
----
-
-### 🎩 RHEL / CentOS / Rocky / Alma / Fedora
-**Install & Enable:**
+**For RHEL / CentOS / Rocky / Fedora:**
 ```bash
-# RHEL 8+/Fedora/Rocky/Alma
+# Usually pre-installed, but run to ensure:
 sudo dnf install -y NetworkManager
-
-# RHEL 7 / CentOS 7
-sudo yum install -y NetworkManager
-
-# Usually already installed & running, but ensure it's active:
 sudo systemctl enable --now NetworkManager
 ```
-*(Note: Enabled by default on all modern RHEL-family systems.)*
 
 ---
 
-### 🔧 Universal `nmcli` Static IP Setup (Works on Both)
-1. **Find your interface & connection name:**
+## Phase 2: Diagnosing & Fixing the "Unmanaged" State (CRITICAL)
+If you run `nmcli device status` and see **`unmanaged`** under the STATE column, NetworkManager is explicitly ignoring your hardware. **You cannot assign an IP until this is fixed.**
+
+### 🔍 Why does this happen?
+1. **Debian/Ubuntu:** The interface is defined in the legacy `/etc/network/interfaces` file, so NM backs off.
+2. **RHEL/CentOS:** The legacy `ifcfg-*` script has `NM_CONTROLLED=no`.
+3. **Cloud Providers (AWS/GCP/Azure) & Proxmox:** `cloud-init` or custom udev rules mark the primary NIC as unmanaged to prevent NM from breaking the cloud metadata network.
+
+### 🛠 The 4-Step Fix for "Unmanaged" Interfaces
+
+**Step 1: Tell NetworkManager to manage `ifupdown` interfaces (Debian/Ubuntu)**
+```bash
+sudo sed -i 's/managed=false/managed=true/g' /etc/NetworkManager/NetworkManager.conf 2>/dev/null || \
+echo -e "\n[ifupdown]\nmanaged=true" | sudo tee -a /etc/NetworkManager/NetworkManager.conf
+```
+
+**Step 2: Remove the interface from legacy configuration files**
+*For Debian/Ubuntu:*
+```bash
+# Replace 'ens33' with your actual interface name
+sudo sed -i '/ens33/d' /etc/network/interfaces 2>/dev/null
+```
+*For RHEL/CentOS (Legacy):*
+```bash
+# Check if legacy scripts exist and ensure NM_CONTROLLED=yes
+sudo sed -i 's/NM_CONTROLLED=no/NM_CONTROLLED=yes/g' /etc/sysconfig/network-scripts/ifcfg-* 2>/dev/null
+```
+
+**Step 3: Check for hidden override files (Common in Cloud VMs)**
+Cloud images often hide "unmanaged" rules in drop-in directories.
+```bash
+# Look for files forcing the device to be unmanaged
+grep -r "unmanaged" /etc/NetworkManager/conf.d/ /usr/lib/NetworkManager/conf.d/ 2>/dev/null
+```
+*If you find a file (e.g., `10-globally-managed-devices.conf`), edit it and change `unmanaged-devices` to `none`, or simply delete the file.*
+
+**Step 4: Restart NM and Force Management via CLI**
+```bash
+sudo systemctl restart NetworkManager
+
+# The magic bullet: Force NM to manage the device via CLI
+sudo nmcli device set ens33 managed yes
+```
+
+**✅ Verification:**
+Run `nmcli device status`. The STATE for your interface **must** now say `disconnected` or `connected`. If it still says `unmanaged`, reboot the server.
+
+---
+
+## Phase 3: Discover Your Network State
+Now that the device is managed, identify your physical interface and check for existing profiles.
+
 ```bash
 nmcli device status
 nmcli connection show
 ```
-Look at the `NAME` column. It might be something like `Wired connection 1`, `System eth0`, `ens33`, or `eth0`.  
-*(Note: `nmcli` edits the **connection profile**, not the raw interface. The profile is already linked to your NIC.)*
+
+**How to read the output:**
+* **DEVICE column:** Your physical NIC name (e.g., `ens33`, `eth0`).
+* **CONNECTION column:** 
+  * If it shows a name (e.g., `Wired connection 1`), a profile **exists**. ➔ Go to **Phase 4A**.
+  * If it shows `--`, no profile exists. ➔ Go to **Phase 4B**.
 
 ---
 
-### 🛠 Step 2: Modify the existing profile
-Replace `"Your-Connection-Name"` with the exact name from Step 1:
+## Phase 4: Configure the Static IP
+
+Choose **Option A** or **Option B** based on your findings in Phase 3.
+
+### Option A: Modify an EXISTING Connection Profile
+*Use this if `nmcli connection show` listed a profile name for your device.*
+
 ```bash
-nmcli connection modify "Your-Connection-Name" \
+# Replace "Wired connection 1" with your actual profile NAME
+nmcli connection modify "Wired connection 1" \
   ipv4.method manual \
-  ipv4.addresses 192.168.1.100/24 \
-  ipv4.gateway 192.168.1.1 \
-  ipv4.dns "8.8.8.8 1.1.1.1" \
+  ipv4.addresses 10.0.0.140/24 \
+  ipv4.gateway 10.0.0.2 \
+  ipv4.dns "10.0.0.2 8.8.8.8" \
   ipv4.ignore-auto-dns yes \
   ipv4.may-fail no
 ```
-🔸 **What each flag does:**
-- `ipv4.method manual` → Forces static IP (instead of `auto`/DHCP)
-- `ipv4.addresses` → Your static IP + CIDR subnet
-- `ipv4.gateway` → Default route
-- `ipv4.dns` → Space-separated DNS servers
-- `ipv4.ignore-auto-dns yes` → Prevents DHCP from overwriting DNS
-- `ipv4.may-fail no` → Stops NM from falling back to DHCP if link is slow
 
----
+### Option B: Create a NEW Connection Profile
+*Use this if you got `Error: unknown connection` or the CONNECTION column showed `--`.*
 
-### 🔄 Step 3: Apply the changes
 ```bash
-nmcli connection up "Your-Connection-Name"
+# Replace 'ens33' with your actual DEVICE name
+nmcli connection add type ethernet ifname ens33 con-name ens33 \
+  ipv4.method manual \
+  ipv4.addresses 10.0.0.140/24 \
+  ipv4.gateway 10.0.0.2 \
+  ipv4.dns "10.0.0.2 8.8.8.8" \
+  ipv4.ignore-auto-dns yes \
+  connection.autoconnect yes
 ```
-This reloads the profile and pushes it to the physical interface. No reboot needed.
+
+*(Note: Update the IP, Subnet CIDR `/24`, Gateway, and DNS to match your specific network.)*
 
 ---
 
-### ✅ Step 4: Verify
+## Phase 5: Apply and Verify
+
+**1. Activate the connection:**
 ```bash
-nmcli connection show "Your-Connection-Name" | grep -E "ipv4\.(method|address|gateway|dns)"
-ip addr show | grep inet
+# Use the profile NAME (e.g., "Wired connection 1" or "ens33")
+nmcli connection up "ens33"
+```
+
+**2. Verify the configuration:**
+```bash
+# Check that the device is now "connected"
+nmcli device status
+
+# Verify the IP is assigned to the interface
+ip -4 addr show ens33
+
+# Verify routing and DNS
+ip route | grep default
+cat /etc/resolv.conf
+
+# Test connectivity
+ping -c 3 10.0.0.2
 ping -c 3 8.8.8.8
 ```
 
 ---
 
-### 🛑 SSH Warning & Recovery
-If you're editing over SSH, a typo can drop your connection.  
-**Recover to DHCP if needed:**
+## 📋 Appendix A: Quick Edit Cheat Sheet
+Once your profile is created, use these quick commands for targeted edits. Always replace `"conn-name"` with your profile name.
+
+| Task | Command |
+| :--- | :--- |
+| **Change IP only** | `nmcli con mod "conn-name" ipv4.addresses 10.0.0.50/24` |
+| **Change Gateway** | `nmcli con mod "conn-name" ipv4.gateway 10.0.0.1` |
+| **Change DNS** | `nmcli con mod "conn-name" ipv4.dns "1.1.1.1 8.8.8.8"` |
+| **Add secondary IP** | `nmcli con mod "conn-name" +ipv4.addresses 10.0.0.51/24` |
+| **Remove secondary IP** | `nmcli con mod "conn-name" -ipv4.addresses 10.0.0.51/24` |
+| **Set MTU (Jumbo)** | `nmcli con mod "conn-name" 802-3-ethernet.mtu 9000` |
+| **Disable IPv6** | `nmcli con mod "conn-name" ipv6.method disabled` |
+| **Revert to DHCP** | `nmcli con mod "conn-name" ipv4.method auto ipv4.addresses "" ipv4.gateway ""` |
+
+🔁 **Crucial:** After running *any* command above, you must apply it:
 ```bash
-nmcli connection modify "Your-Connection-Name" ipv4.method auto ipv4.addresses "" ipv4.gateway ""
-nmcli connection up "Your-Connection-Name"
+nmcli connection up "conn-name"
 ```
 
 ---
 
-### 📋 Quick `nmcli` Edit Reference
+## 🛠 Appendix B: Troubleshooting & Recovery
 
-Here’s a quick-reference cheat sheet for editing an **existing** `nmcli` connection. Replace `"Your-Connection-Name"` with your exact connection name (from `nmcli con show`).
+**1. I locked myself out over SSH!**
+* **Fix:** Access the server via physical console, hypervisor VM console (VMware/Proxmox), or cloud provider VNC/Web Console. Run the following to revert to DHCP and get back online:
+  ```bash
+  nmcli connection modify "ens33" ipv4.method auto ipv4.addresses "" ipv4.gateway ""
+  nmcli connection up "ens33"
+  ```
 
-⚠️ **Rule**: After *any* `modify` command, run `nmcli con up "Your-Connection-Name"` to apply. Changes are persistent.
+**2. "Error: Device 'ens33' not managed" when running `connection up`**
+* **Cause:** The "unmanaged" fix in Phase 2 didn't fully clear the cache.
+* **Fix:** Run `sudo nmcli device set ens33 managed yes`, followed by `sudo systemctl restart NetworkManager`, then try `nmcli connection up "ens33"` again.
 
-| Task | Command |
-|------|---------|
-| **Change IP only** | `nmcli con mod "Your-Connection-Name" ipv4.addresses 192.168.1.100/24` |
-| **Change Gateway only** | `nmcli con mod "Your-Connection-Name" ipv4.gateway 192.168.1.1` |
-| **Change DNS only** | `nmcli con mod "Your-Connection-Name" ipv4.dns "8.8.8.8 1.1.1.1"` |
-| **Add secondary IP** | `nmcli con mod "Your-Connection-Name" +ipv4.addresses 192.168.1.101/24` |
-| **Remove secondary IP** | `nmcli con mod "Your-Connection-Name" -ipv4.addresses 192.168.1.101/24` |
-| **Force static + ignore DHCP DNS** | `nmcli con mod "Your-Connection-Name" ipv4.method manual ipv4.ignore-auto-dns yes` |
-| **Revert to DHCP** | `nmcli con mod "Your-Connection-Name" ipv4.method auto ipv4.addresses "" ipv4.gateway ""` |
-| **Set IPv6 static** | `nmcli con mod "Your-Connection-Name" ipv6.method manual ipv6.addresses fd00::10/64 ipv6.gateway fd00::1` |
-| **Disable IPv6** | `nmcli con mod "Your-Connection-Name" ipv6.method disabled` |
-| **Set MTU (e.g., Jumbo Frames)** | `nmcli con mod "Your-Connection-Name" 802-3-ethernet.mtu 9000` |
-| **Add DNS search domain** | `nmcli con mod "Your-Connection-Name" ipv4.dns-search "example.local corp.local"` |
-| **Rename connection profile** | `nmcli con mod "old-name" connection.id "new-name"` |
-
-### 🔁 Always Apply After Editing:
-```bash
-nmcli con up "Your-Connection-Name"
-```
-
-### 🔍 Quick Verify:
-```bash
-nmcli con show "Your-Connection-Name" | grep -E "ipv4\.(method|address|gateway|dns|ignore-auto)"
-ip -4 addr show dev <interface>
-```
-
-💡 **Pro Tip**: Use `nmcli con mod` (short for `modify`) and `nmcli con up` for faster typing. All edits survive reboots and work identically on Debian & RHEL families.
-
-Run `nmcli connection show "Your-Connection-Name"` to dump every current setting before/after editing.
+**3. DNS isn't resolving after applying static IP**
+* **Cause:** `systemd-resolved` or `resolvconf` is overriding `/etc/resolv.conf`.
+* **Fix:** Force NetworkManager to take over DNS resolution:
+  ```bash
+  sudo ln -sf /run/NetworkManager/resolv.conf /etc/resolv.conf
+  sudo systemctl restart NetworkManager
+  ```
