@@ -17,13 +17,7 @@ sudo apt update && sudo apt install -y network-manager
 sudo dnf install -y NetworkManager
 ```
 
-**2. Disable conflicting legacy network services:**
-```bash
-sudo systemctl disable --now systemd-networkd 2>/dev/null
-sudo systemctl disable --now networking 2>/dev/null  # Debian's ifupdown service
-```
-
-**3. Enable NetworkManager to start on boot:**
+**2. Enable NetworkManager to start on boot:**
 ```bash
 sudo systemctl enable --now NetworkManager
 ```
